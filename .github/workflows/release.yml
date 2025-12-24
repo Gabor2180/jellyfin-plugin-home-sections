@@ -1,0 +1,146 @@
+name: Build and Release
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version number (e.g., 2.5.0.0)'
+        required: true
+        type: string
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    strategy:
+      matrix:
+        jellyfin_version: ['10.10.7', '10.11.5']
+        include:
+          - jellyfin_version: '10.10.7'
+            dotnet_version: '8.0.x'
+            target_abi: '10.10.7.0'
+          - jellyfin_version: '10.11.5'
+            dotnet_version: '9.0.x'
+            target_abi: '10.11.5.0'
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ matrix.dotnet_version }}
+
+      - name: Restore dependencies
+        run: dotnet restore src/Jellyfin.Plugin.HomeScreenSections.sln
+
+      - name: Build plugin
+        run: |
+          dotnet build src/Jellyfin.Plugin.HomeScreenSections.sln \
+            --configuration Release \
+            --no-restore \
+            -p:JellyfinVersion=${{ matrix.jellyfin_version }}
+
+      - name: Create plugin zip
+        run: |
+          cd src/Jellyfin.Plugin.HomeScreenSections/bin/Release/net*/
+          zip -r ../../../../../home-screen-sections-${{ matrix.jellyfin_version }}.zip .
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: plugin-${{ matrix.jellyfin_version }}
+          path: home-screen-sections-${{ matrix.jellyfin_version }}.zip
+
+  update-manifest:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+
+      - name: Get version
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" == "release" ]; then
+            VERSION="${{ github.event.release.tag_name }}"
+            VERSION="${VERSION#v}"
+          else
+            VERSION="${{ inputs.version }}"
+          fi
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Version: $VERSION"
+
+      - name: Calculate checksums
+        id: checksums
+        run: |
+          CHECKSUM_10107=$(md5sum plugin-10.10.7/home-screen-sections-10.10.7.zip | cut -d ' ' -f 1)
+          CHECKSUM_10115=$(md5sum plugin-10.11.5/home-screen-sections-10.11.5.zip | cut -d ' ' -f 1)
+          echo "checksum_10107=$CHECKSUM_10107" >> $GITHUB_OUTPUT
+          echo "checksum_10115=$CHECKSUM_10115" >> $GITHUB_OUTPUT
+
+      - name: Update manifest.json
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          CHANGELOG="${{ github.event.release.body }}"
+          if [ -z "$CHANGELOG" ]; then
+            CHANGELOG="Release version $VERSION"
+          fi
+          CHECKSUM_10107="${{ steps.checksums.outputs.checksum_10107 }}"
+          CHECKSUM_10115="${{ steps.checksums.outputs.checksum_10115 }}"
+          
+          # Create new version entries
+          jq --arg version "$VERSION" \
+             --arg timestamp "$TIMESTAMP" \
+             --arg changelog "$CHANGELOG" \
+             --arg checksum_10107 "$CHECKSUM_10107" \
+             --arg checksum_10115 "$CHECKSUM_10115" \
+             --arg repo "${{ github.repository }}" \
+             '.[0].versions = [
+               {
+                 "version": $version,
+                 "changelog": $changelog,
+                 "targetAbi": "10.10.7.0",
+                 "sourceUrl": "https://github.com/\($repo)/releases/download/v\($version)/home-screen-sections-10.10.7.zip",
+                 "checksum": $checksum_10107,
+                 "timestamp": $timestamp
+               },
+               {
+                 "version": $version,
+                 "changelog": $changelog,
+                 "targetAbi": "10.11.5.0",
+                 "sourceUrl": "https://github.com/\($repo)/releases/download/v\($version)/home-screen-sections-10.11.5.zip",
+                 "checksum": $checksum_10115,
+                 "timestamp": $timestamp
+               }
+             ] + .[0].versions' manifest.json > manifest.json.tmp
+          mv manifest.json.tmp manifest.json
+
+      - name: Commit updated manifest
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add manifest.json
+          git commit -m "Update manifest.json for version ${{ steps.version.outputs.version }}" || echo "No changes to commit"
+          git push
+
+      - name: Upload release assets
+        if: github.event_name == 'release'
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            plugin-10.10.7/home-screen-sections-10.10.7.zip
+            plugin-10.11.5/home-screen-sections-10.11.5.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
