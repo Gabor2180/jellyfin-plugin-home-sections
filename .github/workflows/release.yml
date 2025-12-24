@@ -36,7 +36,7 @@ jobs:
           dotnet-version: ${{ matrix.dotnet_version }}
 
       - name: Restore dependencies
-        run: dotnet restore src/Jellyfin.Plugin.HomeScreenSections.sln
+        run: dotnet restore src/Jellyfin.Plugin.HomeScreenSections.sln -p:JellyfinVersion=${{ matrix.jellyfin_version }}
 
       - name: Build plugin
         run: |
