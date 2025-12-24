@@ -3,7 +3,7 @@
     "guid": "b8298e01-2697-407a-b44d-aa8dc795e850",
     "name": "Home Screen Sections",
     "description": "A Jellyfin plugin which allows users to update their web client's home screen to be a bit more dynamic and more 'Netflixy'. Includes sections like Continue Watching, Next Up, Recently Added, Because You Watched, Watch Again, Genre-based sections, and integrations with Jellyseerr for Discover and My Requests sections.",
-    "overview": "Customize your Jellyfin home screen with dynamic sections like Netflix",
+    "overview": "Customize your Jellyfin home screen with dynamic sections like Netflix test",
     "owner": "IAmParadox27",
     "category": "General",
     "imageUrl": "https://raw.githubusercontent.com/IAmParadox27/jellyfin-plugin-home-sections/main/src/logo.png",
